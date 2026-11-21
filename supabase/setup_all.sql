@@ -9,6 +9,9 @@ create table if not exists videos(id uuid primary key default gen_random_uuid(),
 create table if not exists changelog(id uuid primary key default gen_random_uuid(),version text not null,title text not null,description text default '',release_date date default current_date,created_at timestamptz default now());
 create table if not exists download_logs(id uuid primary key default gen_random_uuid(),release_id uuid not null references software_releases on delete cascade,downloaded_at timestamptz default now());
 create index if not exists software_releases_status_release_date_idx on software_releases(status,release_date desc);create index if not exists download_logs_release_id_downloaded_at_idx on download_logs(release_id,downloaded_at desc);create index if not exists features_display_order_idx on features(display_order);
+grant usage on schema public to anon, authenticated;
+grant select on public.profiles, public.software_releases, public.features, public.website_content, public.videos, public.changelog, public.download_logs to anon, authenticated;
+grant insert, update, delete on public.profiles, public.software_releases, public.features, public.website_content, public.videos, public.changelog, public.download_logs to authenticated;
 
 create or replace function is_admin() returns boolean language sql security definer stable set search_path=public as $$select exists(select 1 from profiles where id=auth.uid() and role in('admin','editor'))$$;
 create or replace function handle_new_user() returns trigger language plpgsql security definer set search_path=public as $$begin insert into profiles(id,email) values(new.id,new.email) on conflict(id) do update set email=excluded.email;return new;end$$;
@@ -66,7 +69,11 @@ drop policy if exists prof_upd on profiles; create policy prof_upd on profiles f
 drop policy if exists prof_adm on profiles; create policy prof_adm on profiles for update using(is_admin()) with check(is_admin());
 drop policy if exists log_own on download_logs; create policy log_own on download_logs for select using(user_id=auth.uid());
 create or replace function block_role_change() returns trigger language plpgsql as $$begin if (new.role<>old.role or new.is_blocked<>old.is_blocked) and auth.uid() is not null and not is_admin() then raise exception 'forbidden';end if;return new;end$$;
-create or replace function handle_new_user() returns trigger language plpgsql security definer set search_path=public as $$begin insert into profiles(id,email,full_name) values(new.id,new.email,new.raw_user_meta_data->>'full_name');return new;end$$;
+create or replace function handle_new_user() returns trigger language plpgsql security definer set search_path=public as $$begin insert into profiles(id,email,full_name) values(new.id,new.email,new.raw_user_meta_data->>'full_name') on conflict(id) do update set email=excluded.email,full_name=coalesce(excluded.full_name,profiles.full_name);return new;end$$;
+insert into profiles(id,email,full_name)
+select u.id,u.email,u.raw_user_meta_data->>'full_name'
+from auth.users u
+on conflict(id) do update set email=excluded.email,full_name=coalesce(excluded.full_name,profiles.full_name);
 create or replace function register_download(rid uuid) returns void language plpgsql security definer set search_path=public as $$begin
  if exists(select 1 from software_releases where id=rid and status='published') and not exists(select 1 from profiles where id=auth.uid() and is_blocked) then
   update software_releases set download_count=download_count+1 where id=rid; insert into download_logs(release_id,user_id) values(rid,auth.uid());end if;end$$;
