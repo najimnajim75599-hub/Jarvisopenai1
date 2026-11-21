@@ -161,13 +161,11 @@ create or replace function log_change() returns trigger language plpgsql securit
 declare j jsonb:=case when tg_op='DELETE' then to_jsonb(old) else to_jsonb(new) end; begin
  if auth.uid() is not null and is_staff() then insert into admin_activity_logs(admin_id,action,detail) values(auth.uid(),tg_op||' '||tg_table_name,coalesce(j->>'title',j->>'version',j->>'section',j->>'email')); end if; return null; end$$;
 
--- ===== upgrade_v5.sql =====
--- v5: downloads require an account. Guests can no longer obtain release files, even by calling the API directly.
+-- ===== public download upgrade =====
+-- Downloads are public. No account, email, password, or email confirmation is required.
+update storage.buckets set public=true where id='releases';
 drop policy if exists rel_dl on storage.objects;
-create policy rel_dl on storage.objects for select to authenticated using(bucket_id='releases' and (is_admin() or (exists(select 1 from software_releases r where r.file_path=name and r.status='published') and not exists(select 1 from profiles where id=auth.uid() and is_blocked))));
-
--- Supabase Dashboard: Authentication -> Providers -> Email -> disable "Confirm email".
--- This is also required for the website registration flow to create an active session immediately.
+create policy rel_dl on storage.objects for select using(bucket_id='releases');
 
 -- FINAL STEP: register on the website, then run with YOUR email:
 -- update profiles set role='admin' where email='YOUR_EMAIL';

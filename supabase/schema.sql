@@ -36,8 +36,8 @@ create policy chg_adm on changelog for all using(is_admin()) with check(is_admin
 create policy log_adm on download_logs for select using(is_admin());
 
 -- Storage: private 'releases', public 'media'
-insert into storage.buckets(id,name,public,file_size_limit) values('releases','releases',false,52428800),('media','media',true,52428800) on conflict do nothing;
-create policy rel_dl on storage.objects for select using(bucket_id='releases' and (is_admin() or exists(select 1 from software_releases r where r.file_path=name and r.status='published')));
+insert into storage.buckets(id,name,public,file_size_limit) values('releases','releases',true,52428800),('media','media',true,52428800) on conflict do nothing;
+create policy rel_dl on storage.objects for select using(bucket_id='releases');
 create policy rel_up on storage.objects for insert with check(bucket_id='releases' and is_admin());
 create policy rel_del on storage.objects for delete using(bucket_id='releases' and is_admin());
 create policy med_up on storage.objects for insert with check(bucket_id='media' and is_admin());

@@ -145,7 +145,7 @@ html.adm-only body>*:not(#adm):not(#usr):not(script):not(style){display:none!imp
 <section id="arch" class="rv"><h2>System <span class="gr">Architecture</span></h2><p class="sub">How JARVIS is designed.</p><div class="arch"><div class="n"><b>User</b>You, by voice or text</div><span>→</span><div class="n"><b>Interface</b>JARVIS desktop app</div><span>→</span><div class="n"><b>AI Engine</b>Reasoning &amp; memory</div><span>→</span><div class="n"><b>Automation Engine</b>Plans actions</div><span>→</span><div class="n"><b>PC Actions</b>Runs on your Windows PC</div></div></section>
 <section id="features" class="rv"><h2>Features</h2><p class="sub">Only features verified by the administrator are listed.</p><div class="grid" id="fg"></div></section>
 <section id="video" class="rv"><h2>See JARVIS in Action</h2><p class="sub" id="vd"></p><div id="vb"></div></section>
-<section id="downloads" class="rv"><h2>Download Center</h2><p class="sub" id="dd">Official JARVIS releases for Windows.</p><p class="mu" style="margin:-20px 0 18px;font-size:14px">🔒 A free account is required to download — you will be asked to sign in or register.</p><div class="card" id="lat"></div>
+<section id="downloads" class="rv"><h2>Download Center</h2><p class="sub" id="dd">Official JARVIS releases for Windows.</p><p class="mu" style="margin:-20px 0 18px;font-size:14px">Free downloads — no account, email, or password required.</p><div class="card" id="lat"></div>
 <h3 style="margin:30px 0 8px">Previous versions</h3><div id="prev"></div>
 <div class="grid" id="docs" style="margin-top:24px"><div class="card"><h3>Documentation · Requirements</h3><p>Windows 10 or 11 (64-bit), 4 GB RAM, microphone for voice features, internet for AI features.</p></div><div class="card"><h3>Installation</h3><p>Download the file, extract if ZIP, then run the installer. Only run files obtained from this official page.</p></div></div></section>
 <section id="changelog" class="rv"><h2>Changelog</h2><p class="sub">Software update history.</p><div id="cl"></div></section>
@@ -182,10 +182,9 @@ async function load(){if(!window.ADM_ONLY)try{let id=localStorage.getItem("sid")
  $("#cl").innerHTML=(l.data||[]).map(x=>`<div class="tl"><small>v${esc(x.version)} · ${esc(x.release_date)}</small><h3>${esc(x.title)}</h3><p class="mu" style="white-space:pre-line">${esc(x.description)}</p></div>`).join("")||"<p class='mu'>No updates yet.</p>";refreshDl();
 }
 const relHtml=x=>`<div class="dl"><div><span class="badge">LATEST</span><h3>JARVIS v${esc(x.version)} — ${esc(x.title)}</h3><p class="mu">${esc(x.description)}</p></div><button class="btn y" data-d="${x.id}">Download for Windows</button></div><div class="meta"><div>Version<b>${esc(x.version)}</b></div><div>Released<b>${esc(x.release_date)}</b></div><div>Size<b>${fmt(x.file_size)}</b></div><div>Type<b>.${esc(x.file_type)}</b></div><div>Downloads<b>${x.download_count}</b></div></div>`;
-document.addEventListener("click",async e=>{const id=e.target.dataset?.d;if(!id)return;const x=REL.find(r=>r.id===id);if(!x)return;const {data:{session}}=await sb.auth.getSession();if(!session){try{sessionStorage.setItem("needdl","1")}catch(_){}location.hash="#login";return}e.target.textContent="Preparing…";
- const {data,error}=await sb.storage.from("releases").createSignedUrl(x.file_path,120,{download:x.file_name});
- e.target.textContent=e.target.dataset.t||"Download";if(error)return alert("Download unavailable: "+error.message);
- sb.rpc("register_download",{rid:id});location.href=data.signedUrl});
+document.addEventListener("click",async e=>{const id=e.target.dataset?.d;if(!id)return;const x=REL.find(r=>r.id===id);if(!x)return;e.target.textContent="Preparing…";
+ const {data}=sb.storage.from("releases").getPublicUrl(x.file_path,{download:x.file_name});
+ e.target.textContent=e.target.dataset.t||"Download";sb.rpc("register_download",{rid:id});location.href=data.publicUrl});
 /* ---------- ADMIN ---------- */
 const A=$("#adm");let tab="overview";
 async function route(){if(window.ADM_ONLY&&location.hash!=="#admin"){location.hash="#admin";return}const h=location.hash;uroute(h);if(h!=="#admin"){A.style.display="none";document.body.style.overflow=h==="#login"||h==="#account"?"hidden":"";return}
@@ -275,11 +274,11 @@ const sp=new THREE.Sprite(new THREE.SpriteMaterial({map:new THREE.CanvasTexture(
 let mx=0,my=0,vis=true;addEventListener("pointermove",e=>{mx=e.clientX/innerWidth-.5;my=e.clientY/innerHeight-.5});new IntersectionObserver(e=>vis=e[0].isIntersecting).observe(c);
 (function f(){requestAnimationFrame(f);if(!vis||document.hidden)return;g.rotation.y+=.004+mx*.01;g.rotation.x+=(my*.7-g.rotation.x)*.05;rings.forEach((m,i)=>m.rotation.z+=.006*(i%2?-1:1)*(i+1));sp.material.opacity=.85+.15*Math.sin(Date.now()/500);r.render(sc,cam)})();window.__t=true}catch(e){}})();
 /* ---------- USER AUTH / ONBOARDING / DASHBOARD ---------- */
-const ND=()=>{try{return sessionStorage.getItem("needdl")}catch(e){return null}};function refreshDl(){document.querySelectorAll("[data-d]").forEach(b=>{if(b.closest("#usr"))return;b.dataset.t=b.dataset.t||b.textContent;b.textContent=ME?b.dataset.t:"Sign in to download"})}
+const ND=()=>{try{return sessionStorage.getItem("needdl")}catch(e){return null}};function refreshDl(){document.querySelectorAll("[data-d]").forEach(b=>{if(b.closest("#usr"))return;b.dataset.t=b.dataset.t||b.textContent;b.textContent=b.dataset.t||"Download"})}
 const U=$("#usr");let ME=null,PROF=null;
 async function sess(){const {data:{session}}=await sb.auth.getSession();ME=session?.user||null;PROF=null;if(ME){const {data}=await sb.from("profiles").select("*").eq("id",ME.id).maybeSingle();PROF=data}
- const l=$("#nl-login");l.textContent=ME?"Dashboard":"Login";l.href=ME?"#account":"#login";$("#nl-start").style.display=ME?"none":"";refreshDl()}
-async function uroute(h){await sess();if(PROF?.is_blocked){await sb.auth.signOut();ME=null;PROF=null;if(h==="#account"||h==="#login"){showAuth("in","This account has been deactivated.");return}}if(h==="#login"){if(ME)return location.hash="#account";showAuth("in",ND()?"Sign in or register to download JARVIS.":"")}else if(h==="#account"){if(!ME)return location.hash="#login";PROF?.onboarded?dash():wizard()}else U.style.display="none"}
+ const l=$("#nl-login");l.textContent="";l.style.display="none";$("#nl-start").style.display="none";refreshDl()}
+async function uroute(h){await sess();if(h==="#login"||h==="#account"){location.hash="#downloads";return}U.style.display="none"}
 function showAuth(mode="in",msg=""){U.style.display="block";const T={in:"Sign in",up:"Create account",rs:"Reset password"}[mode];
 U.innerHTML=`<div class="ab" style="max-width:440px;padding-top:9vh"><div class="card"><span class="mo">JARVIS ACCESS</span><h2>${T}</h2><div class="tabs" style="padding:0 0 10px">${[["in","Sign in"],["up","Register"],["rs","Reset"]].map(([k,l])=>`<button class="btn s ${k===mode?"on":""}" data-m="${k}">${l}</button>`).join("")}</div>${mode==="up"?'<label>Full name</label><input id="an" autocomplete="name">':""}<label>Email</label><input id="ae" type="email" autocomplete="username">${mode!=="rs"?'<label>Password (min 10 characters)</label><input id="ap" type="password" autocomplete="current-password">':""}<button class="btn y" id="ag">${T}</button> <a class="btn" href="#home">Back</a><p class="msg" id="am">${esc(msg)}</p></div></div>`;
 U.querySelectorAll("[data-m]").forEach(b=>b.onclick=()=>showAuth(b.dataset.m));

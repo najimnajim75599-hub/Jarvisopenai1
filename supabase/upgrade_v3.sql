@@ -12,9 +12,9 @@ create policy se_adm on system_events for all using(is_admin()) with check(is_ad
 create policy le_adm on login_events for select using(is_admin() or user_id=auth.uid());
 create policy nt_read on notifications for select using(is_admin() or (scheduled_for<=now() and (target_user is null or target_user=auth.uid())));
 create policy nt_adm on notifications for all using(is_admin()) with check(is_admin());
--- blocked accounts cannot fetch release files
+-- Public downloads do not require an account or email confirmation.
 drop policy if exists rel_dl on storage.objects;
-create policy rel_dl on storage.objects for select using(bucket_id='releases' and (is_admin() or (exists(select 1 from software_releases r where r.file_path=name and r.status='published') and not exists(select 1 from profiles where id=auth.uid() and is_blocked))));
+create policy rel_dl on storage.objects for select using(bucket_id='releases');
 create or replace function track_visit(sid text) returns void language sql security definer set search_path=public as $$insert into site_visits(sid) values(left(sid,40)) on conflict do nothing$$;
 create or replace function log_login(em text,ok boolean) returns void language plpgsql security definer set search_path=public as $$begin
  insert into login_events(user_id,email,success) values(auth.uid(),left(em,200),ok); if ok and auth.uid() is not null then update profiles set last_login_at=now() where id=auth.uid(); end if; end$$;
