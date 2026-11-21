@@ -14,6 +14,13 @@ grant select on public.profiles, public.software_releases, public.features, publ
 grant insert, update, delete on public.profiles, public.software_releases, public.features, public.website_content, public.videos, public.changelog, public.download_logs to authenticated;
 
 create or replace function is_admin() returns boolean language sql security definer stable set search_path=public as $$select exists(select 1 from profiles where id=auth.uid() and role in('admin','editor'))$$;
+create or replace function get_my_profile() returns json language plpgsql security definer set search_path=public as $$declare r profiles%rowtype; begin
+ if auth.uid() is null then return null; end if;
+ select * into r from profiles where id=auth.uid();
+ if not found then return null; end if;
+ return json_build_object('id',r.id,'email',r.email,'role',r.role,'created_at',r.created_at);
+end$$;
+grant execute on function get_my_profile() to authenticated;
 create or replace function handle_new_user() returns trigger language plpgsql security definer set search_path=public as $$begin insert into profiles(id,email) values(new.id,new.email) on conflict(id) do update set email=excluded.email;return new;end$$;
 drop trigger if exists on_auth_user_created on auth.users;
 create trigger on_auth_user_created after insert on auth.users for each row execute function handle_new_user();

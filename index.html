@@ -189,8 +189,9 @@ document.addEventListener("click",async e=>{const id=e.target.dataset?.d;if(!id)
 const A=$("#adm");let tab="overview";
 async function route(){if(window.ADM_ONLY&&location.hash!=="#admin"){location.hash="#admin";return}const h=location.hash;uroute(h);if(h!=="#admin"){A.style.display="none";document.body.style.overflow=h==="#login"||h==="#account"?"hidden":"";return}
  A.style.display="block";document.body.style.overflow="hidden";const {data:{session}}=await sb.auth.getSession();if(!session)return login();
- const {data:p}=await sb.from("profiles").select("role").eq("id",session.user.id).maybeSingle();
- if(!p||!["admin","editor"].includes(p.role)){A.innerHTML=`<div class="ab"><h2>Not authorized</h2><p class="mu">${esc(session.user.email)} is not an administrator.</p><button class="btn" id="lo">Log out</button> <a class="btn" href="#home">Back</a></div>`;$("#lo").onclick=out;return}
+ const {data:p,error:pe}=await sb.rpc("get_my_profile");
+ if(pe||!p){A.innerHTML=`<div class="ab"><h2>Authorization check failed</h2><p class="mu">${esc(session.user.email)} · ${esc(pe?.message||"Profile not found")}</p><button class="btn" id="lo">Log out</button> <a class="btn" href="#home">Back</a></div>`;$("#lo").onclick=out;return}
+ if(!["admin","editor"].includes(p.role)){A.innerHTML=`<div class="ab"><h2>Not authorized</h2><p class="mu">${esc(session.user.email)} is not an administrator.</p><button class="btn" id="lo">Log out</button> <a class="btn" href="#home">Back</a></div>`;$("#lo").onclick=out;return}
  ROLE=p.role;panel(session.user)}
 const out=async()=>{await sb.auth.signOut();location.hash="#home";route()};
 function login(){A.innerHTML=`<div class="ab" style="max-width:420px;padding-top:12vh"><h2>Admin Login</h2><p class="sub mu">Authorized administrators only.</p><label>Email</label><input id="em" type="email" autocomplete="username"><label>Password</label><input id="pw" type="password" autocomplete="current-password"><button class="btn y" id="go">Sign in</button> <a class="btn" href="#home">Back</a><p class="msg err" id="lm"></p></div>`;
