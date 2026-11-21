@@ -1,0 +1,3 @@
+# Needed because auth is verified inside the function (works with new Supabase API keys)
+[functions.jarvis-voice]
+verify_jwt = false
