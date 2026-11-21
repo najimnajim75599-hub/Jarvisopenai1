@@ -1,50 +1,52 @@
 -- ===== schema.sql =====
 -- JARVIS schema. Run once in Supabase SQL Editor.
 create extension if not exists pgcrypto;
-create table profiles(id uuid primary key references auth.users on delete cascade,email text,role text not null default 'user' check(role in('user','admin')),created_at timestamptz default now());
-create table software_releases(id uuid primary key default gen_random_uuid(),version text not null unique,title text not null,description text default '',file_path text not null,file_name text not null,file_size bigint not null check(file_size>0),file_type text not null check(file_type in('zip','exe','bat')),release_date date default current_date,status text not null default 'draft' check(status in('draft','published','archived')),download_count int not null default 0,created_at timestamptz default now());
-create table features(id uuid primary key default gen_random_uuid(),title text not null,description text default '',icon text default '⚡',is_active boolean default true,display_order int default 0);
-create table website_content(id uuid primary key default gen_random_uuid(),section text not null unique,title text,description text,content text,updated_at timestamptz default now());
-create table videos(id uuid primary key default gen_random_uuid(),title text not null,description text default '',video_path text not null,thumbnail_path text,is_active boolean default true,created_at timestamptz default now());
-create table changelog(id uuid primary key default gen_random_uuid(),version text not null,title text not null,description text default '',release_date date default current_date,created_at timestamptz default now());
-create table download_logs(id uuid primary key default gen_random_uuid(),release_id uuid not null references software_releases on delete cascade,downloaded_at timestamptz default now());
-create index on software_releases(status,release_date desc);create index on download_logs(release_id,downloaded_at desc);create index on features(display_order);
+create table if not exists profiles(id uuid primary key references auth.users on delete cascade,email text,role text not null default 'user' check(role in('user','admin')),created_at timestamptz default now());
+create table if not exists software_releases(id uuid primary key default gen_random_uuid(),version text not null unique,title text not null,description text default '',file_path text not null,file_name text not null,file_size bigint not null check(file_size>0),file_type text not null check(file_type in('zip','exe','bat')),release_date date default current_date,status text not null default 'draft' check(status in('draft','published','archived')),download_count int not null default 0,created_at timestamptz default now());
+create table if not exists features(id uuid primary key default gen_random_uuid(),title text not null,description text default '',icon text default '⚡',is_active boolean default true,display_order int default 0);
+create table if not exists website_content(id uuid primary key default gen_random_uuid(),section text not null unique,title text,description text,content text,updated_at timestamptz default now());
+create table if not exists videos(id uuid primary key default gen_random_uuid(),title text not null,description text default '',video_path text not null,thumbnail_path text,is_active boolean default true,created_at timestamptz default now());
+create table if not exists changelog(id uuid primary key default gen_random_uuid(),version text not null,title text not null,description text default '',release_date date default current_date,created_at timestamptz default now());
+create table if not exists download_logs(id uuid primary key default gen_random_uuid(),release_id uuid not null references software_releases on delete cascade,downloaded_at timestamptz default now());
+create index if not exists software_releases_status_release_date_idx on software_releases(status,release_date desc);create index if not exists download_logs_release_id_downloaded_at_idx on download_logs(release_id,downloaded_at desc);create index if not exists features_display_order_idx on features(display_order);
 
-create function is_admin() returns boolean language sql security definer stable set search_path=public as $$select exists(select 1 from profiles where id=auth.uid() and role='admin')$$;
-create function handle_new_user() returns trigger language plpgsql security definer set search_path=public as $$begin insert into profiles(id,email) values(new.id,new.email);return new;end$$;
+create or replace function is_admin() returns boolean language sql security definer stable set search_path=public as $$select exists(select 1 from profiles where id=auth.uid() and role in('admin','editor'))$$;
+create or replace function handle_new_user() returns trigger language plpgsql security definer set search_path=public as $$begin insert into profiles(id,email) values(new.id,new.email) on conflict(id) do update set email=excluded.email;return new;end$$;
+drop trigger if exists on_auth_user_created on auth.users;
 create trigger on_auth_user_created after insert on auth.users for each row execute function handle_new_user();
-create function register_download(rid uuid) returns void language plpgsql security definer set search_path=public as $$begin
+create or replace function register_download(rid uuid) returns void language plpgsql security definer set search_path=public as $$begin
  if exists(select 1 from software_releases where id=rid and status='published') then
   update software_releases set download_count=download_count+1 where id=rid; insert into download_logs(release_id) values(rid);end if;end$$;
 grant execute on function register_download(uuid) to anon,authenticated;
 
 -- Prevent users from promoting themselves
-create function block_role_change() returns trigger language plpgsql as $$begin if new.role<>old.role and not (select is_admin()) and auth.uid() is not null then raise exception 'forbidden';end if;return new;end$$;
+create or replace function block_role_change() returns trigger language plpgsql as $$begin if new.role<>old.role and not (select is_admin()) and auth.uid() is not null then raise exception 'forbidden';end if;return new;end$$;
+drop trigger if exists no_self_promote on profiles;
 create trigger no_self_promote before update on profiles for each row execute function block_role_change();
 
 alter table profiles enable row level security;alter table software_releases enable row level security;alter table features enable row level security;alter table website_content enable row level security;alter table videos enable row level security;alter table changelog enable row level security;alter table download_logs enable row level security;
-create policy p_read_self on profiles for select using(id=auth.uid() or is_admin());
-create policy rel_pub on software_releases for select using(status='published' or is_admin());
-create policy rel_adm on software_releases for all using(is_admin()) with check(is_admin());
-create policy feat_pub on features for select using(is_active or is_admin());
-create policy feat_adm on features for all using(is_admin()) with check(is_admin());
-create policy cont_pub on website_content for select using(true);
-create policy cont_adm on website_content for all using(is_admin()) with check(is_admin());
-create policy vid_pub on videos for select using(is_active or is_admin());
-create policy vid_adm on videos for all using(is_admin()) with check(is_admin());
-create policy chg_pub on changelog for select using(true);
-create policy chg_adm on changelog for all using(is_admin()) with check(is_admin());
-create policy log_adm on download_logs for select using(is_admin());
+drop policy if exists p_read_self on profiles; create policy p_read_self on profiles for select using(id=auth.uid() or is_admin());
+drop policy if exists rel_pub on software_releases; create policy rel_pub on software_releases for select using(status='published' or is_admin());
+drop policy if exists rel_adm on software_releases; create policy rel_adm on software_releases for all using(is_admin()) with check(is_admin());
+drop policy if exists feat_pub on features; create policy feat_pub on features for select using(is_active or is_admin());
+drop policy if exists feat_adm on features; create policy feat_adm on features for all using(is_admin()) with check(is_admin());
+drop policy if exists cont_pub on website_content; create policy cont_pub on website_content for select using(true);
+drop policy if exists cont_adm on website_content; create policy cont_adm on website_content for all using(is_admin()) with check(is_admin());
+drop policy if exists vid_pub on videos; create policy vid_pub on videos for select using(is_active or is_admin());
+drop policy if exists vid_adm on videos; create policy vid_adm on videos for all using(is_admin()) with check(is_admin());
+drop policy if exists chg_pub on changelog; create policy chg_pub on changelog for select using(true);
+drop policy if exists chg_adm on changelog; create policy chg_adm on changelog for all using(is_admin()) with check(is_admin());
+drop policy if exists log_adm on download_logs; create policy log_adm on download_logs for select using(is_admin());
 
 -- Storage: private 'releases', public 'media'
 insert into storage.buckets(id,name,public,file_size_limit) values('releases','releases',false,52428800),('media','media',true,52428800) on conflict do nothing;
-create policy rel_dl on storage.objects for select using(bucket_id='releases' and (is_admin() or exists(select 1 from software_releases r where r.file_path=name and r.status='published')));
-create policy rel_up on storage.objects for insert with check(bucket_id='releases' and is_admin());
-create policy rel_del on storage.objects for delete using(bucket_id='releases' and is_admin());
-create policy med_up on storage.objects for insert with check(bucket_id='media' and is_admin());
-create policy med_upd on storage.objects for update using(bucket_id='media' and is_admin());
-create policy med_del on storage.objects for delete using(bucket_id='media' and is_admin());
-create policy med_read on storage.objects for select using(bucket_id='media');
+drop policy if exists rel_dl on storage.objects; create policy rel_dl on storage.objects for select using(bucket_id='releases' and (is_admin() or exists(select 1 from software_releases r where r.file_path=name and r.status='published')));
+drop policy if exists rel_up on storage.objects; create policy rel_up on storage.objects for insert with check(bucket_id='releases' and is_admin());
+drop policy if exists rel_del on storage.objects; create policy rel_del on storage.objects for delete using(bucket_id='releases' and is_admin());
+drop policy if exists med_up on storage.objects; create policy med_up on storage.objects for insert with check(bucket_id='media' and is_admin());
+drop policy if exists med_upd on storage.objects; create policy med_upd on storage.objects for update using(bucket_id='media' and is_admin());
+drop policy if exists med_del on storage.objects; create policy med_del on storage.objects for delete using(bucket_id='media' and is_admin());
+drop policy if exists med_read on storage.objects; create policy med_read on storage.objects for select using(bucket_id='media');
 
 -- ADMIN SETUP: 1) Authentication > Users > Add user (your email + password, auto-confirm). 2) Run, with your email:
 -- update profiles set role='admin' where email='YOUR_EMAIL';
@@ -58,21 +60,25 @@ alter table features add column if not exists status text not null default 'soon
 alter table download_logs add column if not exists user_id uuid references auth.users on delete set null;
 create table if not exists announcements(id uuid primary key default gen_random_uuid(),title text not null,description text default '',is_active boolean default true,created_at timestamptz default now());
 alter table announcements enable row level security;
-create policy ann_pub on announcements for select using(is_active or is_admin());
-create policy ann_adm on announcements for all using(is_admin()) with check(is_admin());
-create policy prof_upd on profiles for update using(id=auth.uid()) with check(id=auth.uid());
-create policy prof_adm on profiles for update using(is_admin()) with check(is_admin());
-create policy log_own on download_logs for select using(user_id=auth.uid());
+drop policy if exists ann_pub on announcements; create policy ann_pub on announcements for select using(is_active or is_admin());
+drop policy if exists ann_adm on announcements; create policy ann_adm on announcements for all using(is_admin()) with check(is_admin());
+drop policy if exists prof_upd on profiles; create policy prof_upd on profiles for update using(id=auth.uid()) with check(id=auth.uid());
+drop policy if exists prof_adm on profiles; create policy prof_adm on profiles for update using(is_admin()) with check(is_admin());
+drop policy if exists log_own on download_logs; create policy log_own on download_logs for select using(user_id=auth.uid());
 create or replace function block_role_change() returns trigger language plpgsql as $$begin if (new.role<>old.role or new.is_blocked<>old.is_blocked) and auth.uid() is not null and not is_admin() then raise exception 'forbidden';end if;return new;end$$;
 create or replace function handle_new_user() returns trigger language plpgsql security definer set search_path=public as $$begin insert into profiles(id,email,full_name) values(new.id,new.email,new.raw_user_meta_data->>'full_name');return new;end$$;
 create or replace function register_download(rid uuid) returns void language plpgsql security definer set search_path=public as $$begin
  if exists(select 1 from software_releases where id=rid and status='published') and not exists(select 1 from profiles where id=auth.uid() and is_blocked) then
   update software_releases set download_count=download_count+1 where id=rid; insert into download_logs(release_id,user_id) values(rid,auth.uid());end if;end$$;
-insert into features(title,description,icon,display_order,status) values
+insert into features(title,description,icon,display_order,status)
+select v.title,v.description,v.icon,v.display_order,v.status
+from (values
 ('Voice Intelligence','Talk to JARVIS naturally.','🎙️',1,'soon'),('AI Conversations','Context-aware dialogue.','💬',2,'soon'),('PC Automation','Run tasks on your PC by command.','⚙️',3,'soon'),
 ('Smart File Management','Find and organize files.','📁',4,'soon'),('Keyboard & Mouse Control','Hands-free input control.','🖱️',5,'soon'),('Weather Intelligence','Live forecasts on request.','🌦️',6,'soon'),
 ('Screen Understanding','Understand what is on screen.','🖥️',7,'soon'),('Smart Message Assistance','Draft and reply to messages.','✉️',8,'soon'),('Face Recognition','Recognize authorized users.','🧑',9,'soon'),
-('Gesture Control','Control JARVIS with gestures.','✋',10,'soon'),('Online AI Intelligence','Connect to online AI models.','🌐',11,'soon'),('Future AI Capabilities','More coming over time.','🚀',12,'soon');
+('Gesture Control','Control JARVIS with gestures.','✋',10,'soon'),('Online AI Intelligence','Connect to online AI models.','🌐',11,'soon'),('Future AI Capabilities','More coming over time.','🚀',12,'soon'))
+AS v(title,description,icon,display_order,status)
+where not exists(select 1 from features f where f.title=v.title);
 -- Mark a feature live in Admin > Features by editing its Status to: available
 
 -- ===== upgrade_v3.sql =====
@@ -85,11 +91,11 @@ create table if not exists site_visits(sid text not null,day date not null defau
 create table if not exists notifications(id uuid primary key default gen_random_uuid(),kind text not null default 'announcement' check(kind in('announcement','maintenance','new_version','direct')),title text not null,body text default '',target_user uuid references auth.users on delete cascade,scheduled_for timestamptz default now(),created_by uuid default auth.uid(),created_at timestamptz default now());
 create index if not exists ix_login_events on login_events(created_at desc);create index if not exists ix_logs on admin_activity_logs(created_at desc);create index if not exists ix_notif on notifications(scheduled_for desc);
 alter table admin_activity_logs enable row level security;alter table system_events enable row level security;alter table login_events enable row level security;alter table site_visits enable row level security;alter table notifications enable row level security;
-create policy al_adm on admin_activity_logs for select using(is_admin());
-create policy se_adm on system_events for all using(is_admin()) with check(is_admin());
-create policy le_adm on login_events for select using(is_admin() or user_id=auth.uid());
-create policy nt_read on notifications for select using(is_admin() or (scheduled_for<=now() and (target_user is null or target_user=auth.uid())));
-create policy nt_adm on notifications for all using(is_admin()) with check(is_admin());
+drop policy if exists al_adm on admin_activity_logs; create policy al_adm on admin_activity_logs for select using(is_admin());
+drop policy if exists se_adm on system_events; create policy se_adm on system_events for all using(is_admin()) with check(is_admin());
+drop policy if exists le_adm on login_events; create policy le_adm on login_events for select using(is_admin() or user_id=auth.uid());
+drop policy if exists nt_read on notifications; create policy nt_read on notifications for select using(is_admin() or (scheduled_for<=now() and (target_user is null or target_user=auth.uid())));
+drop policy if exists nt_adm on notifications; create policy nt_adm on notifications for all using(is_admin()) with check(is_admin());
 -- blocked accounts cannot fetch release files
 drop policy if exists rel_dl on storage.objects;
 create policy rel_dl on storage.objects for select using(bucket_id='releases' and (is_admin() or (exists(select 1 from software_releases r where r.file_path=name and r.status='published') and not exists(select 1 from profiles where id=auth.uid() and is_blocked))));
