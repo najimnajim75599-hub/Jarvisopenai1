@@ -166,6 +166,8 @@ declare j jsonb:=case when tg_op='DELETE' then to_jsonb(old) else to_jsonb(new) 
 drop policy if exists rel_dl on storage.objects;
 create policy rel_dl on storage.objects for select to authenticated using(bucket_id='releases' and (is_admin() or (exists(select 1 from software_releases r where r.file_path=name and r.status='published') and not exists(select 1 from profiles where id=auth.uid() and is_blocked))));
 
+-- Supabase Dashboard: Authentication -> Providers -> Email -> disable "Confirm email".
+-- This is also required for the website registration flow to create an active session immediately.
 
 -- FINAL STEP: register on the website, then run with YOUR email:
 -- update profiles set role='admin' where email='YOUR_EMAIL';
