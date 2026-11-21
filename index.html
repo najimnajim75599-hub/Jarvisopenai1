@@ -163,7 +163,16 @@ const io=new IntersectionObserver(e=>e.forEach(x=>x.isIntersecting&&x.target.cla
 for(let i=0;i<45;i++)p.push({x:Math.random()*w,y:Math.random()*h,v:.2+Math.random()*.4,y2:Math.random()<.2});
 (function f(){x.clearRect(0,0,w,h);p.forEach(a=>{a.y-=a.v;if(a.y<0){a.y=h;a.x=Math.random()*w}x.fillStyle=a.y2?"rgba(255,200,61,.6)":"rgba(255,138,31,.5)";x.fillRect(a.x,a.y,2,2)});requestAnimationFrame(f)})()})();
 let REL=[];
-async function load(){if(!window.ADM_ONLY)try{let id=localStorage.getItem("sid");if(!id){id=crypto.randomUUID();localStorage.setItem("sid",id)}sb.rpc("track_visit",{sid:id})}catch(e){}
+const deviceInfo=()=>{const ua=navigator.userAgent||"",platform=navigator.userAgentData?.platform||navigator.platform||"Unknown";
+ let model="Desktop";
+ if(/Android/i.test(ua)){const m=ua.match(/;\s([^;]+)\sBuild\//);model=m?.[1]?.trim()||"Android device"}
+ else if(/iPhone/i.test(ua)){model="iPhone"}
+ else if(/iPad/i.test(ua)){model="iPad"}
+ else if(/Windows/i.test(ua)){model="Windows PC"}
+ else if(/Macintosh/i.test(ua)){model="Mac"}
+ else if(/Linux/i.test(ua)){model="Linux PC"}
+ return{name:platform,model}};
+async function load(){if(!window.ADM_ONLY)try{let id=localStorage.getItem("jarvis_device_id");if(!id){id=crypto.randomUUID();localStorage.setItem("jarvis_device_id",id)}const d=deviceInfo();sb.rpc("track_visit",{sid:id,device_name:d.name,device_model:d.model})}catch(e){}
 
  const [c,f,v,r,l]=await Promise.all([sb.from("website_content").select("*"),sb.from("features").select("*").eq("is_active",true).order("display_order"),sb.from("videos").select("*").eq("is_active",true).order("created_at",{ascending:false}).limit(1),sb.from("software_releases").select("*").eq("status","published").order("is_latest",{ascending:false}).order("release_date",{ascending:false}),sb.from("changelog").select("*").order("release_date",{ascending:false})]);
  if(c.error||r.error){$("#stat").innerHTML="<span style='color:var(--red)'>Backend not ready — run supabase/schema.sql</span>";return}
@@ -387,11 +396,11 @@ if(VOFF)$("#vtog").textContent="🔇 Voice off";
 document.addEventListener("click",e=>{const a=e.target.closest&&e.target.closest('a[href="#home"]');if(a&&window.ADM_ONLY){e.preventDefault();location.href="index.html"}});
 addEventListener("hashchange",route);load();route();
 /* ---------- Visitor information form ---------- */
-(()=>{const key="jarvis_visitor_submitted";if(sessionStorage.getItem(key)==="1")return;
+(()=>{const key="jarvis_visitor_submitted";if(localStorage.getItem(key)==="1")return;
  const roles=["Student","Developer","Designer","Software Engineer","AI/ML Engineer","Web Developer","App Developer","Game Developer","Cybersecurity Specialist","Data Analyst","Data Scientist","Digital Marketer","Content Creator","YouTuber","Influencer","Entrepreneur","Business Owner","Freelancer","Teacher","Engineer","Doctor","Student Researcher","Job Seeker","Other"];
  setTimeout(()=>{const m=document.createElement("div");m.id="visitor-form";m.style.cssText="position:fixed;inset:0;z-index:500;display:flex;align-items:center;justify-content:center;padding:18px;background:rgba(2,5,12,.78);backdrop-filter:blur(12px)";
  m.innerHTML=`<div class="card" style="max-width:460px;width:100%;padding:24px"><span class="mo">JARVIS COMMUNITY</span><h2 style="margin:8px 0">Tell us about yourself</h2><p class="mu" style="margin:0 0 16px">Optional visitor information. No password or account is required.</p><label>Name</label><input id="vf-name" autocomplete="name"><label>Gmail / Email</label><input id="vf-email" type="email" autocomplete="email"><label>Phone number <span class="mu">(optional)</span></label><input id="vf-phone" type="tel" autocomplete="tel"><label>Instagram username <span class="mu">(optional)</span></label><input id="vf-insta" placeholder="@username"><label>Role</label><select id="vf-role"><option value="">Choose a role</option>${roles.map(r=>`<option>${esc(r)}</option>`).join("")}</select><p class="msg" id="vf-msg"></p><button class="btn y" id="vf-save">Continue</button> <button class="btn s" id="vf-close">Skip for now</button></div>`;
- document.body.appendChild(m);const close=()=>{sessionStorage.setItem(key,"1");m.remove()};$("#vf-close").onclick=close;
- $("#vf-save").onclick=async()=>{const name=$("#vf-name").value.trim(),email=$("#vf-email").value.trim(),role=$("#vf-role").value;if(!name)return $("#vf-msg").textContent="Please enter your name";if(!email||!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email))return $("#vf-msg").textContent="Please enter a valid email";if(!role)return $("#vf-msg").textContent="Please choose a role";const r=await sb.from("visitor_submissions").insert({full_name:name,email,phone:$("#vf-phone").value.trim()||null,instagram:$("#vf-insta").value.trim().replace(/^@/, "")||null,role});if(r.error)return $("#vf-msg").textContent=r.error.message;close()};
+ document.body.appendChild(m);const close=()=>{localStorage.setItem(key,"1");m.remove()};$("#vf-close").onclick=close;
+ $("#vf-save").onclick=async()=>{const name=$("#vf-name").value.trim(),email=$("#vf-email").value.trim(),role=$("#vf-role").value;if(!name)return $("#vf-msg").textContent="Please enter your name";if(!email||!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email))return $("#vf-msg").textContent="Please enter a valid email";if(!role)return $("#vf-msg").textContent="Please choose a role";let deviceId=localStorage.getItem("jarvis_device_id");if(!deviceId){deviceId=crypto.randomUUID();localStorage.setItem("jarvis_device_id",deviceId)}const d=deviceInfo();const r=await sb.from("visitor_submissions").insert({full_name:name,email,phone:$("#vf-phone").value.trim()||null,instagram:$("#vf-insta").value.trim().replace(/^@/, "")||null,role,device_id:deviceId,device_name:d.name,device_model:d.model});if(r.error)return $("#vf-msg").textContent=r.error.message;close()};
  },1500)})();
 </script></body></html>

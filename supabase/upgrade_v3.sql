@@ -5,6 +5,10 @@ create table if not exists system_events(id uuid primary key default gen_random_
 create table if not exists login_events(id uuid primary key default gen_random_uuid(),user_id uuid references auth.users on delete set null,email text,success boolean not null,created_at timestamptz default now());
 create table if not exists site_visits(sid text not null,day date not null default current_date,visited_at timestamptz default now(),primary key(sid,day));
 create table if not exists notifications(id uuid primary key default gen_random_uuid(),kind text not null default 'announcement' check(kind in('announcement','maintenance','new_version','direct')),title text not null,body text default '',target_user uuid references auth.users on delete cascade,scheduled_for timestamptz default now(),created_by uuid default auth.uid(),created_at timestamptz default now());
+create table if not exists visitor_submissions(id uuid primary key default gen_random_uuid(),full_name text not null,email text not null,phone text,instagram text,role text not null,device_id text,device_name text,device_model text,created_at timestamptz default now());
+alter table visitor_submissions enable row level security;
+drop policy if exists visitor_submit on visitor_submissions; create policy visitor_submit on visitor_submissions for insert to anon,authenticated with check(full_name<>'' and email<>'' and role<>'');
+drop policy if exists visitor_adm on visitor_submissions; create policy visitor_adm on visitor_submissions for select using(is_admin());
 create index if not exists ix_login_events on login_events(created_at desc);create index if not exists ix_logs on admin_activity_logs(created_at desc);create index if not exists ix_notif on notifications(scheduled_for desc);
 alter table admin_activity_logs enable row level security;alter table system_events enable row level security;alter table login_events enable row level security;alter table site_visits enable row level security;alter table notifications enable row level security;
 create policy al_adm on admin_activity_logs for select using(is_admin());
@@ -15,18 +19,24 @@ create policy nt_adm on notifications for all using(is_admin()) with check(is_ad
 -- Public downloads do not require an account or email confirmation.
 drop policy if exists rel_dl on storage.objects;
 create policy rel_dl on storage.objects for select using(bucket_id='releases');
-create or replace function track_visit(sid text) returns void language sql security definer set search_path=public as $$insert into site_visits(sid) values(left(sid,40)) on conflict do nothing$$;
+create table if not exists site_visit_events(id uuid primary key default gen_random_uuid(),sid text not null,device_name text,device_model text,visited_at timestamptz default now());
+alter table site_visit_events enable row level security;
+drop policy if exists sve_adm on site_visit_events; create policy sve_adm on site_visit_events for select using(is_admin());
+create or replace function track_visit(sid text,device_name text default null,device_model text default null) returns void language plpgsql security definer set search_path=public as $$begin
+ insert into site_visits(sid) values(left(sid,40)) on conflict(sid,day) do update set visited_at=now();
+ insert into site_visit_events(sid,device_name,device_model) values(left(sid,40),left(device_name,100),left(device_model,100));
+end$$;
 create or replace function log_login(em text,ok boolean) returns void language plpgsql security definer set search_path=public as $$begin
  insert into login_events(user_id,email,success) values(auth.uid(),left(em,200),ok); if ok and auth.uid() is not null then update profiles set last_login_at=now() where id=auth.uid(); end if; end$$;
-grant execute on function track_visit(text),log_login(text,boolean) to anon,authenticated;
+grant execute on function track_visit(text,text,text),log_login(text,boolean) to anon,authenticated;
 create or replace function admin_stats() returns json language plpgsql security definer set search_path=public as $$begin
  if not is_admin() then raise exception 'forbidden'; end if;
  return json_build_object('users',(select count(*) from profiles),'active',(select count(*) from profiles where last_login_at>now()-interval '30 days'),
- 'downloads',(select coalesce(sum(download_count),0) from software_releases),'visitors',(select count(distinct sid) from site_visits),
+ 'downloads',(select coalesce(sum(download_count),0) from software_releases),'visitors',(select count(*) from site_visit_events),'submissions',(select count(*) from visitor_submissions),
  'logins',(select count(*) from login_events),'failed',(select count(*) from login_events where not success),
  'dl_series',(select json_agg(json_build_object('d',d::date,'n',(select count(*) from download_logs where downloaded_at::date=d::date)) order by d) from generate_series(current_date-13,current_date,'1 day') d),
  'user_series',(select json_agg(json_build_object('d',d::date,'n',(select count(*) from profiles where created_at::date=d::date)) order by d) from generate_series(current_date-13,current_date,'1 day') d),
- 'visit_series',(select json_agg(json_build_object('d',d::date,'n',(select count(*) from site_visits where day=d::date)) order by d) from generate_series(current_date-13,current_date,'1 day') d));end$$;
+ 'visit_series',(select json_agg(json_build_object('d',d::date,'n',(select count(*) from site_visit_events where visited_at::date=d::date)) order by d) from generate_series(current_date-13,current_date,'1 day') d));end$$;
 create or replace function admin_delete_user(uid uuid) returns void language plpgsql security definer set search_path=public,auth as $$begin
  if not is_admin() then raise exception 'forbidden'; end if; if uid=auth.uid() then raise exception 'You cannot delete yourself'; end if;
  insert into admin_activity_logs(admin_id,action,detail) values(auth.uid(),'DELETE user',(select email from profiles where id=uid)); delete from auth.users where id=uid; end$$;

@@ -9,6 +9,7 @@ create table if not exists videos(id uuid primary key default gen_random_uuid(),
 create table if not exists changelog(id uuid primary key default gen_random_uuid(),version text not null,title text not null,description text default '',release_date date default current_date,created_at timestamptz default now());
 create table if not exists download_logs(id uuid primary key default gen_random_uuid(),release_id uuid not null references software_releases on delete cascade,downloaded_at timestamptz default now());
 create table if not exists visitor_submissions(id uuid primary key default gen_random_uuid(),full_name text not null,email text not null,phone text,instagram text,role text not null,created_at timestamptz default now());
+alter table visitor_submissions add column if not exists device_id text,add column if not exists device_name text,add column if not exists device_model text;
 create index if not exists software_releases_status_release_date_idx on software_releases(status,release_date desc);create index if not exists download_logs_release_id_downloaded_at_idx on download_logs(release_id,downloaded_at desc);create index if not exists features_display_order_idx on features(display_order);
 grant usage on schema public to anon, authenticated;
 grant select on public.profiles, public.software_releases, public.features, public.website_content, public.videos, public.changelog, public.download_logs, public.visitor_submissions to anon, authenticated;
@@ -109,9 +110,12 @@ create table if not exists admin_activity_logs(id uuid primary key default gen_r
 create table if not exists system_events(id uuid primary key default gen_random_uuid(),level text default 'info',message text not null,created_at timestamptz default now());
 create table if not exists login_events(id uuid primary key default gen_random_uuid(),user_id uuid references auth.users on delete set null,email text,success boolean not null,created_at timestamptz default now());
 create table if not exists site_visits(sid text not null,day date not null default current_date,visited_at timestamptz default now(),primary key(sid,day));
+create table if not exists site_visit_events(id uuid primary key default gen_random_uuid(),sid text not null,device_name text,device_model text,visited_at timestamptz default now());
+create index if not exists ix_site_visit_events on site_visit_events(visited_at desc);
 create table if not exists notifications(id uuid primary key default gen_random_uuid(),kind text not null default 'announcement' check(kind in('announcement','maintenance','new_version','direct')),title text not null,body text default '',target_user uuid references auth.users on delete cascade,scheduled_for timestamptz default now(),created_by uuid default auth.uid(),created_at timestamptz default now());
 create index if not exists ix_login_events on login_events(created_at desc);create index if not exists ix_logs on admin_activity_logs(created_at desc);create index if not exists ix_notif on notifications(scheduled_for desc);
-alter table admin_activity_logs enable row level security;alter table system_events enable row level security;alter table login_events enable row level security;alter table site_visits enable row level security;alter table notifications enable row level security;
+alter table admin_activity_logs enable row level security;alter table system_events enable row level security;alter table login_events enable row level security;alter table site_visits enable row level security;alter table site_visit_events enable row level security;alter table notifications enable row level security;
+drop policy if exists sve_adm on site_visit_events; create policy sve_adm on site_visit_events for select using(is_admin());
 drop policy if exists al_adm on admin_activity_logs; create policy al_adm on admin_activity_logs for select using(is_admin());
 drop policy if exists se_adm on system_events; create policy se_adm on system_events for all using(is_admin()) with check(is_admin());
 drop policy if exists le_adm on login_events; create policy le_adm on login_events for select using(is_admin() or user_id=auth.uid());
@@ -120,18 +124,21 @@ drop policy if exists nt_adm on notifications; create policy nt_adm on notificat
 -- blocked accounts cannot fetch release files
 drop policy if exists rel_dl on storage.objects;
 create policy rel_dl on storage.objects for select using(bucket_id='releases' and (is_admin() or (exists(select 1 from software_releases r where r.file_path=name and r.status='published') and not exists(select 1 from profiles where id=auth.uid() and is_blocked))));
-create or replace function track_visit(sid text) returns void language sql security definer set search_path=public as $$insert into site_visits(sid) values(left(sid,40)) on conflict do nothing$$;
+create or replace function track_visit(sid text,device_name text default null,device_model text default null) returns void language plpgsql security definer set search_path=public as $$begin
+ insert into site_visits(sid) values(left(sid,40)) on conflict(sid,day) do update set visited_at=now();
+ insert into site_visit_events(sid,device_name,device_model) values(left(sid,40),left(device_name,100),left(device_model,100));
+end$$;
 create or replace function log_login(em text,ok boolean) returns void language plpgsql security definer set search_path=public as $$begin
  insert into login_events(user_id,email,success) values(auth.uid(),left(em,200),ok); if ok and auth.uid() is not null then update profiles set last_login_at=now() where id=auth.uid(); end if; end$$;
-grant execute on function track_visit(text),log_login(text,boolean) to anon,authenticated;
+grant execute on function track_visit(text,text,text),log_login(text,boolean) to anon,authenticated;
 create or replace function admin_stats() returns json language plpgsql security definer set search_path=public as $$begin
  if not is_admin() then raise exception 'forbidden'; end if;
  return json_build_object('users',(select count(*) from profiles),'active',(select count(*) from profiles where last_login_at>now()-interval '30 days'),
- 'downloads',(select coalesce(sum(download_count),0) from software_releases),'visitors',(select count(distinct sid) from site_visits),'submissions',(select count(*) from visitor_submissions),
+ 'downloads',(select coalesce(sum(download_count),0) from software_releases),'visitors',(select count(*) from site_visit_events),'submissions',(select count(*) from visitor_submissions),
  'logins',(select count(*) from login_events),'failed',(select count(*) from login_events where not success),
  'dl_series',(select json_agg(json_build_object('d',d::date,'n',(select count(*) from download_logs where downloaded_at::date=d::date)) order by d) from generate_series(current_date-13,current_date,'1 day') d),
  'user_series',(select json_agg(json_build_object('d',d::date,'n',(select count(*) from profiles where created_at::date=d::date)) order by d) from generate_series(current_date-13,current_date,'1 day') d),
- 'visit_series',(select json_agg(json_build_object('d',d::date,'n',(select count(*) from site_visits where day=d::date)) order by d) from generate_series(current_date-13,current_date,'1 day') d));end$$;
+ 'visit_series',(select json_agg(json_build_object('d',d::date,'n',(select count(*) from site_visit_events where visited_at::date=d::date)) order by d) from generate_series(current_date-13,current_date,'1 day') d));end$$;
 create or replace function admin_delete_user(uid uuid) returns void language plpgsql security definer set search_path=public,auth as $$begin
  if not is_admin() then raise exception 'forbidden'; end if; if uid=auth.uid() then raise exception 'You cannot delete yourself'; end if;
  insert into admin_activity_logs(admin_id,action,detail) values(auth.uid(),'DELETE user',(select email from profiles where id=uid)); delete from auth.users where id=uid; end$$;
@@ -173,6 +180,14 @@ declare j jsonb:=case when tg_op='DELETE' then to_jsonb(old) else to_jsonb(new) 
 update storage.buckets set public=true where id='releases';
 drop policy if exists rel_dl on storage.objects;
 create policy rel_dl on storage.objects for select using(bucket_id='releases');
+
+create or replace function register_download(rid uuid) returns void language plpgsql security definer set search_path=public as $$begin
+ if exists(select 1 from software_releases where id=rid and status='published') then
+  update software_releases set download_count=download_count+1 where id=rid;
+  insert into download_logs(release_id) values(rid);
+ end if;
+end$$;
+grant execute on function register_download(uuid) to anon,authenticated;
 
 -- FINAL STEP: register on the website, then run with YOUR email:
 -- update profiles set role='admin' where email='YOUR_EMAIL';
