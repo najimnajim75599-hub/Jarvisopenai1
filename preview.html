@@ -196,7 +196,7 @@ const b=document.createElement("div");b.textContent="PREVIEW MODE · sample data
 </script>
 <script>
 const SB_URL="https://preview.local",SB_KEY="preview";
-const sb=supabase.createClient(SB_URL,SB_KEY),$=s=>document.querySelector(s);
+const sb=supabase.createClient(SB_URL,SB_KEY,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true}}),$=s=>document.querySelector(s);
 const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const fmt=b=>b>1e6?(b/1e6).toFixed(1)+" MB":(b/1e3).toFixed(0)+" KB";
 $("#mb").onclick=()=>$("#nl").classList.toggle("o");$("#nl").onclick=()=>$("#nl").classList.remove("o");

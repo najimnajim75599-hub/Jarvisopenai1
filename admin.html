@@ -155,7 +155,7 @@ html.adm-only body>*:not(#adm):not(#usr):not(script):not(style){display:none!imp
 <div id="cl"></div><div id="adm"></div><div id="usr"></div>
 <script>
 const SB_URL="https://bgjrxpjedynxpzgdvmgm.supabase.co",SB_KEY="sb_publishable_4PyfSq1MuLNfguRaL4xchw_PQRoYKxG";
-const sb=supabase.createClient(SB_URL,SB_KEY),$=s=>document.querySelector(s);
+const sb=supabase.createClient(SB_URL,SB_KEY,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true}}),$=s=>document.querySelector(s);
 const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const fmt=b=>b>1e6?(b/1e6).toFixed(1)+" MB":(b/1e3).toFixed(0)+" KB";
 $("#mb").onclick=()=>$("#nl").classList.toggle("o");$("#nl").onclick=()=>$("#nl").classList.remove("o");
@@ -188,9 +188,12 @@ document.addEventListener("click",async e=>{const id=e.target.dataset?.d;if(!id)
 /* ---------- ADMIN ---------- */
 const A=$("#adm");let tab="overview";
 async function route(){if(window.ADM_ONLY&&location.hash!=="#admin"){location.hash="#admin";return}const h=location.hash;uroute(h);if(h!=="#admin"){A.style.display="none";document.body.style.overflow=h==="#login"||h==="#account"?"hidden":"";return}
- A.style.display="block";document.body.style.overflow="hidden";const {data:{session}}=await sb.auth.getSession();if(!session)return login();
- const {data:p,error:pe}=await sb.rpc("get_my_profile");
- if(pe||!p){A.innerHTML=`<div class="ab"><h2>Authorization check failed</h2><p class="mu">${esc(session.user.email)} · ${esc(pe?.message||"Profile not found")}</p><button class="btn" id="lo">Log out</button> <a class="btn" href="#home">Back</a></div>`;$("#lo").onclick=out;return}
+ A.style.display="block";document.body.style.overflow="hidden";let {data:{session}}=await sb.auth.getSession();
+ if(!session){const refreshed=await sb.auth.refreshSession();session=refreshed.data?.session}
+ if(!session)return login();
+ let {data:p,error:pe}=await sb.rpc("get_my_profile");
+ if(/jwt.*expired|session.*expired/i.test(pe?.message||"")){await sb.auth.refreshSession();const retry=await sb.auth.getSession();session=retry.data?.session;if(session){const again=await sb.rpc("get_my_profile");p=again.data;pe=again.error}}
+ if(pe||!p){if(/jwt.*expired|session.*expired/i.test(pe?.message||"")){await sb.auth.signOut();return login()}A.innerHTML=`<div class="ab"><h2>Authorization check failed</h2><p class="mu">${esc(session?.user?.email||"")} · ${esc(pe?.message||"Profile not found")}</p><button class="btn" id="lo">Log out</button> <a class="btn" href="#home">Back</a></div>`;$("#lo").onclick=out;return}
  if(!["admin","editor"].includes(p.role)){A.innerHTML=`<div class="ab"><h2>Not authorized</h2><p class="mu">${esc(session.user.email)} is not an administrator.</p><button class="btn" id="lo">Log out</button> <a class="btn" href="#home">Back</a></div>`;$("#lo").onclick=out;return}
  ROLE=p.role;panel(session.user)}
 const out=async()=>{await sb.auth.signOut();location.hash="#home";route()};
@@ -396,5 +399,6 @@ $("#ssend").onclick=say;$("#sin").onkeydown=e=>{if(e.key==="Enter")say()};
 $("#vtog").onclick=()=>{VOFF=!VOFF;try{localStorage.setItem("vmute",VOFF?"1":"0")}catch(e){}$("#vtog").textContent=VOFF?"🔇 Voice off":"🔊 Voice on";if(VOFF){speechSynthesis.cancel();AUD&&AUD.pause();document.body.classList.remove("speaking")}};
 if(VOFF)$("#vtog").textContent="🔇 Voice off";
 document.addEventListener("click",e=>{const a=e.target.closest&&e.target.closest('a[href="#home"]');if(a&&window.ADM_ONLY){e.preventDefault();location.href="index.html"}});
+sb.auth.onAuthStateChange?.((event)=>{if(event==="SIGNED_OUT"){tab="overview";login()}else if(event==="TOKEN_REFRESHED"){route()}});
 addEventListener("hashchange",route);load();route();
 </script></body></html>
