@@ -6,6 +6,7 @@ create table if not exists login_events(id uuid primary key default gen_random_u
 create table if not exists site_visits(sid text not null,day date not null default current_date,visited_at timestamptz default now(),primary key(sid,day));
 create table if not exists notifications(id uuid primary key default gen_random_uuid(),kind text not null default 'announcement' check(kind in('announcement','maintenance','new_version','direct')),title text not null,body text default '',target_user uuid references auth.users on delete cascade,scheduled_for timestamptz default now(),created_by uuid default auth.uid(),created_at timestamptz default now());
 create table if not exists visitor_submissions(id uuid primary key default gen_random_uuid(),full_name text not null,email text not null,phone text,instagram text,role text not null,device_id text,device_name text,device_model text,created_at timestamptz default now());
+create unique index if not exists visitor_submissions_device_id_uidx on visitor_submissions(device_id) where device_id is not null;
 alter table visitor_submissions enable row level security;
 drop policy if exists visitor_submit on visitor_submissions; create policy visitor_submit on visitor_submissions for insert to anon,authenticated with check(full_name<>'' and email<>'' and role<>'');
 drop policy if exists visitor_adm on visitor_submissions; create policy visitor_adm on visitor_submissions for select using(is_admin());
@@ -26,9 +27,14 @@ create or replace function track_visit(sid text,device_name text default null,de
  insert into site_visits(sid) values(left(sid,40)) on conflict(sid,day) do update set visited_at=now();
  insert into site_visit_events(sid,device_name,device_model) values(left(sid,40),left(device_name,100),left(device_model,100));
 end$$;
+create table if not exists removed_visitor_devices(device_id text primary key,removed_at timestamptz default now());
+alter table removed_visitor_devices enable row level security;
+create or replace function check_visitor_device(p_device_id text) returns text language sql security definer stable set search_path=public as $$select case when exists(select 1 from removed_visitor_devices where device_id=p_device_id) then 'removed' when exists(select 1 from visitor_submissions where device_id=p_device_id) then 'registered' else 'none' end$$;
+create or replace function register_visitor(p_name text,p_email text,p_phone text,p_instagram text,p_role text,p_device_id text,p_device_name text,p_device_model text) returns void language plpgsql security definer set search_path=public as $$begin delete from removed_visitor_devices where device_id=p_device_id; insert into visitor_submissions(full_name,email,phone,instagram,role,device_id,device_name,device_model) values(p_name,p_email,p_phone,p_instagram,p_role,p_device_id,p_device_name,p_device_model) on conflict(device_id) where device_id is not null do update set full_name=excluded.full_name,email=excluded.email,phone=excluded.phone,instagram=excluded.instagram,role=excluded.role,device_name=excluded.device_name,device_model=excluded.device_model,created_at=now();end$$;
+create or replace function remove_visitor_submission(p_submission_id uuid) returns void language plpgsql security definer set search_path=public as $$declare p_device text;begin if not is_admin() then raise exception 'admin required';end if;select device_id into p_device from visitor_submissions where id=p_submission_id;if p_device is not null then insert into removed_visitor_devices(device_id) values(p_device) on conflict(device_id) do update set removed_at=now();end if;delete from visitor_submissions where id=p_submission_id;end$$;
 create or replace function log_login(em text,ok boolean) returns void language plpgsql security definer set search_path=public as $$begin
  insert into login_events(user_id,email,success) values(auth.uid(),left(em,200),ok); if ok and auth.uid() is not null then update profiles set last_login_at=now() where id=auth.uid(); end if; end$$;
-grant execute on function track_visit(text,text,text),log_login(text,boolean) to anon,authenticated;
+grant execute on function track_visit(text,text,text),check_visitor_device(text),register_visitor(text,text,text,text,text,text,text,text),remove_visitor_submission(uuid),log_login(text,boolean) to anon,authenticated;
 create or replace function admin_stats() returns json language plpgsql security definer set search_path=public as $$begin
  if not is_admin() then raise exception 'forbidden'; end if;
  return json_build_object('users',(select count(*) from profiles),'active',(select count(*) from profiles where last_login_at>now()-interval '30 days'),

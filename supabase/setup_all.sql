@@ -10,6 +10,8 @@ create table if not exists changelog(id uuid primary key default gen_random_uuid
 create table if not exists download_logs(id uuid primary key default gen_random_uuid(),release_id uuid not null references software_releases on delete cascade,downloaded_at timestamptz default now());
 create table if not exists visitor_submissions(id uuid primary key default gen_random_uuid(),full_name text not null,email text not null,phone text,instagram text,role text not null,created_at timestamptz default now());
 alter table visitor_submissions add column if not exists device_id text,add column if not exists device_name text,add column if not exists device_model text;
+create table if not exists removed_visitor_devices(device_id text primary key,removed_at timestamptz default now());
+alter table removed_visitor_devices enable row level security;
 create index if not exists software_releases_status_release_date_idx on software_releases(status,release_date desc);create index if not exists download_logs_release_id_downloaded_at_idx on download_logs(release_id,downloaded_at desc);create index if not exists features_display_order_idx on features(display_order);
 grant usage on schema public to anon, authenticated;
 grant select on public.profiles, public.software_releases, public.features, public.website_content, public.videos, public.changelog, public.download_logs, public.visitor_submissions, public.site_visit_events to anon, authenticated;
@@ -130,7 +132,32 @@ create or replace function track_visit(sid text,device_name text default null,de
 end$$;
 create or replace function log_login(em text,ok boolean) returns void language plpgsql security definer set search_path=public as $$begin
  insert into login_events(user_id,email,success) values(auth.uid(),left(em,200),ok); if ok and auth.uid() is not null then update profiles set last_login_at=now() where id=auth.uid(); end if; end$$;
-grant execute on function track_visit(text,text,text),log_login(text,boolean) to anon,authenticated;
+create or replace function check_visitor_device(p_device_id text) returns text language sql security definer stable set search_path=public as $$
+ select case
+  when exists(select 1 from removed_visitor_devices where device_id=p_device_id) then 'removed'
+  when exists(select 1 from visitor_submissions where device_id=p_device_id) then 'registered'
+  else 'none'
+ end
+$$;
+create or replace function remove_visitor_submission(p_submission_id uuid) returns void language plpgsql security definer set search_path=public as $$
+ declare p_device text;
+ begin
+  if not is_admin() then raise exception 'admin required'; end if;
+  select device_id into p_device from visitor_submissions where id=p_submission_id;
+  if p_device is not null then insert into removed_visitor_devices(device_id) values(p_device) on conflict(device_id) do update set removed_at=now(); end if;
+  delete from visitor_submissions where id=p_submission_id;
+ end
+$$;
+create or replace function register_visitor(p_name text,p_email text,p_phone text,p_instagram text,p_role text,p_device_id text,p_device_name text,p_device_model text) returns void language plpgsql security definer set search_path=public as $$
+ begin
+  delete from removed_visitor_devices where device_id=p_device_id;
+  insert into visitor_submissions(full_name,email,phone,instagram,role,device_id,device_name,device_model)
+  values(p_name,p_email,p_phone,p_instagram,p_role,p_device_id,p_device_name,p_device_model)
+  on conflict(device_id) where device_id is not null do update set full_name=excluded.full_name,email=excluded.email,phone=excluded.phone,instagram=excluded.instagram,role=excluded.role,device_name=excluded.device_name,device_model=excluded.device_model,created_at=now();
+ end
+$$;
+create unique index if not exists visitor_submissions_device_id_uidx on visitor_submissions(device_id) where device_id is not null;
+grant execute on function track_visit(text,text,text),check_visitor_device(text),register_visitor(text,text,text,text,text,text,text,text),remove_visitor_submission(uuid),log_login(text,boolean) to anon,authenticated;
 create or replace function admin_stats() returns json language plpgsql security definer set search_path=public as $$begin
  if not is_admin() then raise exception 'forbidden'; end if;
  return json_build_object('users',(select count(*) from profiles),'active',(select count(*) from profiles where last_login_at>now()-interval '30 days'),
