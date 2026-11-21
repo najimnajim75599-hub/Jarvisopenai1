@@ -8,9 +8,11 @@ create table if not exists website_content(id uuid primary key default gen_rando
 create table if not exists videos(id uuid primary key default gen_random_uuid(),title text not null,description text default '',video_path text not null,thumbnail_path text,is_active boolean default true,created_at timestamptz default now());
 create table if not exists changelog(id uuid primary key default gen_random_uuid(),version text not null,title text not null,description text default '',release_date date default current_date,created_at timestamptz default now());
 create table if not exists download_logs(id uuid primary key default gen_random_uuid(),release_id uuid not null references software_releases on delete cascade,downloaded_at timestamptz default now());
+create table if not exists visitor_submissions(id uuid primary key default gen_random_uuid(),full_name text not null,email text not null,phone text,instagram text,role text not null,created_at timestamptz default now());
 create index if not exists software_releases_status_release_date_idx on software_releases(status,release_date desc);create index if not exists download_logs_release_id_downloaded_at_idx on download_logs(release_id,downloaded_at desc);create index if not exists features_display_order_idx on features(display_order);
 grant usage on schema public to anon, authenticated;
-grant select on public.profiles, public.software_releases, public.features, public.website_content, public.videos, public.changelog, public.download_logs to anon, authenticated;
+grant select on public.profiles, public.software_releases, public.features, public.website_content, public.videos, public.changelog, public.download_logs, public.visitor_submissions to anon, authenticated;
+grant insert on public.visitor_submissions to anon, authenticated;
 grant insert, update, delete on public.profiles, public.software_releases, public.features, public.website_content, public.videos, public.changelog, public.download_logs to authenticated;
 
 create or replace function is_admin() returns boolean language sql security definer stable set search_path=public as $$select exists(select 1 from profiles where id=auth.uid() and role in('admin','editor'))$$;
@@ -35,6 +37,11 @@ drop trigger if exists no_self_promote on profiles;
 create trigger no_self_promote before update on profiles for each row execute function block_role_change();
 
 alter table profiles enable row level security;alter table software_releases enable row level security;alter table features enable row level security;alter table website_content enable row level security;alter table videos enable row level security;alter table changelog enable row level security;alter table download_logs enable row level security;
+alter table visitor_submissions enable row level security;
+drop policy if exists visitor_submit on visitor_submissions;
+create policy visitor_submit on visitor_submissions for insert to anon,authenticated with check(full_name<>'' and email<>'' and role<>'');
+drop policy if exists visitor_adm on visitor_submissions;
+create policy visitor_adm on visitor_submissions for select using(is_admin());
 drop policy if exists p_read_self on profiles; create policy p_read_self on profiles for select using(id=auth.uid() or is_admin());
 drop policy if exists rel_pub on software_releases; create policy rel_pub on software_releases for select using(status='published' or is_admin());
 drop policy if exists rel_adm on software_releases; create policy rel_adm on software_releases for all using(is_admin()) with check(is_admin());
@@ -120,7 +127,7 @@ grant execute on function track_visit(text),log_login(text,boolean) to anon,auth
 create or replace function admin_stats() returns json language plpgsql security definer set search_path=public as $$begin
  if not is_admin() then raise exception 'forbidden'; end if;
  return json_build_object('users',(select count(*) from profiles),'active',(select count(*) from profiles where last_login_at>now()-interval '30 days'),
- 'downloads',(select coalesce(sum(download_count),0) from software_releases),'visitors',(select count(distinct sid) from site_visits),
+ 'downloads',(select coalesce(sum(download_count),0) from software_releases),'visitors',(select count(distinct sid) from site_visits),'submissions',(select count(*) from visitor_submissions),
  'logins',(select count(*) from login_events),'failed',(select count(*) from login_events where not success),
  'dl_series',(select json_agg(json_build_object('d',d::date,'n',(select count(*) from download_logs where downloaded_at::date=d::date)) order by d) from generate_series(current_date-13,current_date,'1 day') d),
  'user_series',(select json_agg(json_build_object('d',d::date,'n',(select count(*) from profiles where created_at::date=d::date)) order by d) from generate_series(current_date-13,current_date,'1 day') d),
