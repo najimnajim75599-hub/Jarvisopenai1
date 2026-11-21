@@ -12,7 +12,7 @@ create table if not exists visitor_submissions(id uuid primary key default gen_r
 alter table visitor_submissions add column if not exists device_id text,add column if not exists device_name text,add column if not exists device_model text;
 create index if not exists software_releases_status_release_date_idx on software_releases(status,release_date desc);create index if not exists download_logs_release_id_downloaded_at_idx on download_logs(release_id,downloaded_at desc);create index if not exists features_display_order_idx on features(display_order);
 grant usage on schema public to anon, authenticated;
-grant select on public.profiles, public.software_releases, public.features, public.website_content, public.videos, public.changelog, public.download_logs, public.visitor_submissions to anon, authenticated;
+grant select on public.profiles, public.software_releases, public.features, public.website_content, public.videos, public.changelog, public.download_logs, public.visitor_submissions, public.site_visit_events to anon, authenticated;
 grant insert on public.visitor_submissions to anon, authenticated;
 grant insert, update, delete on public.profiles, public.software_releases, public.features, public.website_content, public.videos, public.changelog, public.download_logs to authenticated;
 

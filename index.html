@@ -192,7 +192,7 @@ async function load(){if(!window.ADM_ONLY)try{let id=localStorage.getItem("jarvi
 const relHtml=x=>`<div class="dl"><div><span class="badge">LATEST</span><h3>JARVIS v${esc(x.version)} — ${esc(x.title)}</h3><p class="mu">${esc(x.description)}</p></div><button class="btn y" data-d="${x.id}">Download for Windows</button></div><div class="meta"><div>Version<b>${esc(x.version)}</b></div><div>Released<b>${esc(x.release_date)}</b></div><div>Size<b>${fmt(x.file_size)}</b></div><div>Type<b>.${esc(x.file_type)}</b></div><div>Downloads<b>${x.download_count}</b></div></div>`;
 document.addEventListener("click",async e=>{const id=e.target.dataset?.d;if(!id)return;const x=REL.find(r=>r.id===id);if(!x)return;e.target.textContent="Preparing…";
  const {data}=sb.storage.from("releases").getPublicUrl(x.file_path,{download:x.file_name});
- e.target.textContent=e.target.dataset.t||"Download";sb.rpc("register_download",{rid:id});location.href=data.publicUrl});
+ e.target.textContent=e.target.dataset.t||"Download";await sb.rpc("register_download",{rid:id});location.href=data.publicUrl});
 /* ---------- ADMIN ---------- */
 const A=$("#adm");let tab="overview";
 async function route(){if(window.ADM_ONLY&&location.hash!=="#admin"){location.hash="#admin";return}const h=location.hash;uroute(h);if(h!=="#admin"){A.style.display="none";document.body.style.overflow=h==="#login"||h==="#account"?"hidden":"";return}
